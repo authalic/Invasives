@@ -198,15 +198,16 @@ class Occurrence:
 
 
     def as_geojson(self):
-        """Returns the species records in a GeoJSON format for use in GIS"""
+        """Returns the species records in a GeoJSON featurecollection format for use in GIS"""
         # NOTE: Records can contain several geometry types in the same table: (point, polygon, or multipolygon WKT)
+        #  QGIS can apparently load a FeatureCollection with features of multiple geometry types
 
         pass
 
 
 # TEST CODE HERE
 
-d = Occurrence(4411)
-
-for x in d.records():
-    print(x[3])
+for weed in noxweeds:
+    if weed["class"] in ["1A", "1B"]:
+        weed_obj = Occurrence(weed["sub"])
+        print("{:<32s} {:>4}".format(weed["name"], weed_obj.count()))
