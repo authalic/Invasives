@@ -100,7 +100,7 @@ countyfips = [49003, 49005, 49011, 49023, 49029, 49035, 49039, 49043, 49045, 490
 # 49057 - Weber
 
 
-class occurrence:
+class Occurrence:
     """
     Represents the data obtained from EDDMapS for a single species code.
     Methods provide data summary info and export as Python objects or data files.
@@ -206,7 +206,7 @@ class occurrence:
 
 # TEST CODE HERE
 
-d = occurrence(4411)
+d = Occurrence(4411)
 
 for x in d.records():
     print(x[3])
