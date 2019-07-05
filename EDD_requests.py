@@ -6,17 +6,23 @@ from bs4 import BeautifulSoup as bs
 
 
 """
-API Data Requests
+Noxious Weed Data Client
+
+Obtains records of noxious plant species from EDDMapS using API data requests.
+Allows export of data in a GIS-friendly format.
+
+Data Sources and Documentation:
 Early Detection & Distribution Mapping System:  https://www.eddmaps.org/
 API Documentation: https://developers.bugwood.org/
 """
 
-# EDD Occurrences
+
+# EDD Occurrences of noxious species
 # API Documentation:  https://developers.bugwood.org/Occurrences/
 url = 'https://api.bugwood.org/rest/api/occurrence.json'
 
 
-# State of Utah Noxious Weed List
+# State of Utah Noxious Weed List (July 2019)
 # source:  https://ag.utah.gov/farmers/plants-industry/noxious-weed-control-resources/state-of-utah-noxious-weed-list/
 noxweeds = [
     {'sub': '3400', 'class': '1A', 'name': 'Plumeless thistle', 'sciname': 'Carduus acanthoides'},
@@ -93,49 +99,71 @@ countyfips = [49003, 49005, 49011, 49023, 49029, 49035, 49039, 49043, 49045, 490
 # 49051 - Wasatch
 # 49057 - Weber
 
-# API Data Request limits:
-# Current limit for rows returned per request is 3000
-
-        # Option 1
-        # url.start - this is the starting row number.
-        # url.length - this is how many rows to return.
-
-        # Option2
-        # url.rows - number of rows to return.
-        # url.page - page number to return.
-
 
 class occurrence:
+    """
+    Represents the data obtained from EDDMapS for a single species code.
+    Methods provide data summary info and export as Python objects or data files.
+    """
 
-    def __init__(self, speciescode):
-
-        self.subject = str(speciescode)  # species code from 
-        self.records = []
-
-        record_start = 0
-        record_len = 1
+    def send_request(self, record_start = 0, record_len = 1):
+        """
+        Sends a GET request to the REST API
+        Returns the results as JSON
+        """
 
         payload = {
             'includeonly': 'objectid,SubjectNumber,commonname,WellKnownText,InfestationStatus,ObservationDate,reporter,Density',
-            'sub': speciescode,  # EDD Subject ID (plant species)
+            'sub': self.subject,  # EDD Subject ID (plant species)
             'dateFormat': 101,  # SQL Server date format code: mm/dd/yyyy
             'countyfips': countyfips,
             'start': record_start,
             'length': record_len
-            }
+        }
 
         # User Agent header
         # Signature requested by Bugwood maintainers to track/contact API users
         headers = {'user-agent': 'Justin Johnson, Utah DNR, jjohnson2@utah.gov'}
 
         # send the GET request to the REST endpoint
+        # store results as a json string
         r = requests.get(url, headers=headers, params=payload)
 
-        # return the results in json
-        self.json = json.loads(r.text)
+        # convert the results to a Python dictionary
+        return json.loads(r.text)
+
+
+    def __init__(self, speciescode):
+
+        self.subject = str(speciescode)  # EDDMapS species code
+
+        # store all records received from EDDMapS as an attribute of the object
+        # each record is a list within the larger master attribute list
+        self.recs = []
+
+        # obtain the basic information about the species from the REST endpoint
+        response = self.send_request()
+
+        # list of header names returned from server with data request
+        self.cols = response["columns"]
 
         # total number of records in EDDMapS for this species code
-        self.recordsTotal = self.json["recordsTotal"]
+        self.recordCount = response["recordsTotal"]
+
+        # if records exist, request them from the REST service
+        if self.recordCount > 0:
+            # request records in batches
+            # Current API data request limit is 3000 rows per request
+
+            batchsize = 1000 # number of records requested per API call
+
+            for x in range(0, self.recordCount, batchsize):
+                # obtain records (in json) between row x and x + batchsize-1
+                rec_batch = self.send_request(x, batchsize-1)
+
+                # append the lists of records recieved to the object attribute list
+                self.recs += rec_batch["data"]
+
 
     def __repr__(self):
         """print the common name and scientific name of species from noxweeds list"""
@@ -143,17 +171,42 @@ class occurrence:
             if x['sub'] == self.subject:
                 return f"{x['name']} ({x['sciname']})"
 
+
     def count(self):
         """Returns the number of records in the EDDMapS database for this species code"""
-        return self.recordsTotal
+        return self.recordCount
+
+
+    def columns(self):
+        """Returns a list of the column headers for the records"""
+        return self.cols
+
+
+    def records(self):
+        """Returns all records as a list of lists"""
+        return self.recs
+
 
     def as_json(self):
-        """Returns the species records as JSON"""
-        return json.dumps(self.json)
-    
+        """Returns the species records as JSON string"""
+        return json.dumps({"columns": self.cols, "data": self.recs})
+
+
     def as_jsonp(self):
-        """Returns the species records as JSON formatted for viewing"""
-        return json.dumps(self.json, sort_keys=True, indent=4)
+        """Returns the species records as JSON string formatted for viewing"""
+        return json.dumps(self.as_json(), sort_keys=True, indent=4)
 
 
-print(occurrence(4411).count())
+    def as_geojson(self):
+        """Returns the species records in a GeoJSON format for use in GIS"""
+        # NOTE: Records can contain several geometry types in the same table: (point, polygon, or multipolygon WKT)
+
+        pass
+
+
+# TEST CODE HERE
+
+d = occurrence(4411)
+
+for x in d.records():
+    print(x[3])
