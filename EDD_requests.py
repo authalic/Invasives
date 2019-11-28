@@ -3,7 +3,12 @@ import json
 import requests
 
 """
-API Data Requests
+Noxious Weed Data Client
+
+Obtains records of noxious plant species from EDDMapS using API data requests.
+Allows export of data in a GIS-friendly format.
+
+Data Sources and Documentation:
 Early Detection & Distribution Mapping System:  https://www.eddmaps.org/
 API Documentation: https://developers.bugwood.org/
 """
@@ -183,10 +188,6 @@ class Occurrence:
 
     def as_json(self):
         """Returns the species records as JSON"""
-
-        # TODO:  if the total number of records exceeds the request limit, multiple requests
-        # need to be sent, and the responses stored in a list
-
         return json.dumps(self.records)
 
 
