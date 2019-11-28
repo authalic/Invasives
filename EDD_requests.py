@@ -2,22 +2,15 @@
 import json
 import requests
 
-from bs4 import BeautifulSoup as bs
-
-
 """
 API Data Requests
 Early Detection & Distribution Mapping System:  https://www.eddmaps.org/
 API Documentation: https://developers.bugwood.org/
 """
 
-# EDD Occurrences
-# API Documentation:  https://developers.bugwood.org/Occurrences/
-url = 'https://api.bugwood.org/rest/api/occurrence.json'
-
-
 # State of Utah Noxious Weed List
 # source:  https://ag.utah.gov/farmers/plants-industry/noxious-weed-control-resources/state-of-utah-noxious-weed-list/
+
 noxweeds = [
     {'sub': '3400', 'class': '1A', 'name': 'Plumeless thistle', 'sciname': 'Carduus acanthoides'},
     {'sub': '4361', 'class': '1A', 'name': 'Mediterranean sage', 'sciname': 'Salvia aethiopis'},
@@ -82,60 +75,99 @@ countyfips = [49003, 49005, 49011, 49023, 49029, 49035, 49039, 49043, 49045, 490
 
 # 49003 - Box Elder
 # 49005 - Cache
-# 49011 - Davis
+# 49011 - Davis *
 # 49023 - Juab
 # 49029 - Morgan
-# 49035 - Salt Lake
+# 49035 - Salt Lake *
 # 49039 - Sanpete
-# 49043 - Summit
+# 49043 - Summit *
 # 49045 - Tooele
-# 49049 - Utah
-# 49051 - Wasatch
-# 49057 - Weber
+# 49049 - Utah *
+# 49051 - Wasatch *
+# 49057 - Weber *
 
 # API Data Request limits:
-# Current limit for rows returned per request is 3000
+# Current limit for records returned per request is 3000
 
         # Option 1
-        # url.start - this is the starting row number.
-        # url.length - this is how many rows to return.
+        # url.start - this is the starting record number.
+        # url.length - this is how many records to return.
 
         # Option2
-        # url.rows - number of rows to return.
+        # url.rows - number of records to return as a "page".
         # url.page - page number to return.
 
 
-class occurrence:
+# EDD Occurrences
+# API Documentation:  https://developers.bugwood.org/Occurrences/
+url = 'https://api.bugwood.org/rest/api/occurrence.json'
+
+payload = {
+    'includeonly': 'objectid,SubjectNumber,commonname,WellKnownText,InfestationStatus,ObservationDate,reporter,Density',
+    'sub': 0,  # EDD Subject ID (plant species)
+    'dateFormat': 101,  # SQL Server date format code: mm/dd/yyyy
+    'countyfips': countyfips,
+    'start': 0,
+    'length': 1
+    }
+
+# User Agent header
+# Signature requested by Bugwood maintainers to track/contact API users
+headers = {'user-agent': 'Justin Johnson, Utah DNR, jjohnson2@utah.gov'}
+
+
+class Occurrence:
+
+    def getRecords(self, speciescode):
+        """returns a dict containing all records for the species code"""
+
+        payload["sub"] = speciescode
+        recordcount = self.recordsTotal  # total record count in feature service
+        batchsize = 3000 # max records per Bugwood API call
+
+        # send request to Bugwood API
+        # use batches, if total record count exceeds 3,000
+
+        for offset in range(0, recordcount, batchsize):
+
+            # print the record range requested by current call
+            if offset + batchsize <= recordcount:
+                print(str(offset) + " - " + str(offset + batchsize))
+            else:
+                print(str(offset) + " - " + str(recordcount))
+                payload["length"] = recordcount - offset
+
+            # send the GET request to the REST endpoint
+            payload["start"] = offset
+            r = requests.get(url, headers=headers, params=payload)
+
+            if offset == 0:
+                # first API request, save complete JSON response as dict
+                records = json.loads(r.text)
+            else:
+                # append the contents of the "data" list on each subsequent call
+                subsequent = json.loads(r.text)
+                records["data"] += subsequent["data"]
+
+        return records
+
 
     def __init__(self, speciescode):
 
-        self.subject = str(speciescode)  # species code from 
-        self.records = []
+        self.subject = str(speciescode)  # species code from Bugwood API subjectnumber
 
-        record_start = 0
-        record_len = 1
+        # update the species code in the API request payload
+        payload["sub"] = speciescode
 
-        payload = {
-            'includeonly': 'objectid,SubjectNumber,commonname,WellKnownText,InfestationStatus,ObservationDate,reporter,Density',
-            'sub': speciescode,  # EDD Subject ID (plant species)
-            'dateFormat': 101,  # SQL Server date format code: mm/dd/yyyy
-            'countyfips': countyfips,
-            'start': record_start,
-            'length': record_len
-            }
-
-        # User Agent header
-        # Signature requested by Bugwood maintainers to track/contact API users
-        headers = {'user-agent': 'Justin Johnson, Utah DNR, jjohnson2@utah.gov'}
-
-        # send the GET request to the REST endpoint
+        # request a single record to get the "recordsTotal" value for species
         r = requests.get(url, headers=headers, params=payload)
 
-        # return the results in json
-        self.json = json.loads(r.text)
+        # save results as object attribute
+        self.recordsTotal = json.loads(r.text)["recordsTotal"]
 
-        # total number of records in EDDMapS for this species code
-        self.recordsTotal = self.json["recordsTotal"]
+        # send the request to get all records for species code
+        self.records = self.getRecords(speciescode) # stored as a dict
+
 
     def __repr__(self):
         """print the common name and scientific name of species from noxweeds list"""
@@ -143,17 +175,36 @@ class occurrence:
             if x['sub'] == self.subject:
                 return f"{x['name']} ({x['sciname']})"
 
+
     def count(self):
         """Returns the number of records in the EDDMapS database for this species code"""
         return self.recordsTotal
 
+
     def as_json(self):
         """Returns the species records as JSON"""
-        return json.dumps(self.json)
-    
+
+        # TODO:  if the total number of records exceeds the request limit, multiple requests
+        # need to be sent, and the responses stored in a list
+
+        return json.dumps(self.records)
+
+
     def as_jsonp(self):
         """Returns the species records as JSON formatted for viewing"""
-        return json.dumps(self.json, sort_keys=True, indent=4)
+        return json.dumps(self.records, sort_keys=True, indent=4)
 
 
-print(occurrence(4411).count())
+
+# Usage
+# import this file as a module
+# instantiate a new Occurrence object, using the subjectnumber ('sub' value in the noxweeds list)
+
+
+# TESTCODE
+
+if __name__ == "__main__":
+    o = Occurrence(3937)
+
+    print(o.count())
+    print(o.as_jsonp())
