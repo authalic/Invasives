@@ -2,6 +2,7 @@ import re
 import json
 import requests
 
+from json import JSONDecodeError
 
 """
 Noxious Weed Data Client
@@ -242,19 +243,62 @@ if __name__ == "__main__":
         return json.loads(records)
 
 
+    def reformat(geom):
+        """Helper function: change coordinate pair string from WKT to GeoJSON"""
+
+        # Split the WKT geometry string into a geometry type, and the coordinates
+        #  input data is not consistently formatted. some string hacks are required
+        #  there may, or may not, be a space between geom and ()
+
+        g = geom.split( '(', maxsplit=1 )
+        geomtype = g[0].strip().title() #remove any extra spaces and convert case to title
+
+        # NOTE: the correct spelling of "Linestring" is "LineString"
+        if geomtype == "Linestring":
+            geomtype = "LineString"
+
+        coordstr = '(' + g[1] # restore opening paren which was lost splitting string
+
+        # RE matches lat/lon coordinate strings, like: "-111.941542 41.2621659"
+        c = re.compile(r'-\d+.\d+\s\d+.\d+')  #NW hemisphere only
+
+        # get a list of coordinate pairs
+        coordlist = c.findall(coordstr)
+
+        # change the format of the coordinate pairs
+        #   from:  "-111.941542 41.2621659,"     <-- WKT
+        #     to:  "[-111.941542, 41.2621659],"  <-- GeoJSON
+        for coord in coordlist:
+
+            newcoord = '[' + coord.replace(' ', ', ') + ']' # add squre brackets and comma
+            coordstr = coordstr.replace(coord, newcoord)
+
+        # replace all parentheses with square brackets
+        coordstr = coordstr.replace('(', '[')
+        coordstr = coordstr.replace(')', ']')
+
+        return (geomtype, coordstr)
+
+
+
     def to_GeoJSON(records):
-        """Converts a dict of species records to properly formatted GeoJSON"""
+        """
+        Converts a dict of species records to properly formatted GeoJSON string
+        for input into QGIS or ArcGIS
+        """
+
+        # GeoJSON Linter  http://geojsonlint.com/
 
         # Geometries in EED Data
-        # stored as WKT, with 3 geometry types: {'POINT', 'POLYGON', 'LINESTRING'}
+        # stored as WKT
+        # 3 geometry types found (so far): {'POINT', 'POLYGON', 'LINESTRING'}
 
         # GeoJSON FeatureCollection
+        # dict containing all of the records reformatted for GeoJSON dump
         collection = {
             "type": "FeatureCollection",
             "features": []
         }
-
-        geomset = set()
 
         # list of columns returned from API
         cols = records["columns"]
@@ -266,34 +310,75 @@ if __name__ == "__main__":
         for record in data:
 
             # create a dict of column names for key/value pairs
+            # NOTE: the wellknowntext field can be dropped from the properties after it is
+            #       converted to GeoJSON (below)
             properties = {col: "" for col in cols}
 
             for x in range(len(cols)):
+                # use 'range' to maintain order of matching between cols and record
                 properties[cols[x]] = record[x]
-            
-            # generic feature dict
+
+            # new feature dict
             feat = {
                 "type": "Feature", 
-                "geometry": {}, 
+                "geometry": {
+                    "type": "",
+                    "coordinates": ""
+                    }, 
                 "properties": properties
                 }
 
-            # append the new feature to the features list in the FeatureCollection dict
-            collection["features"].append(feat)
+            
+            #TODO: Convert the value stored in "wellknowntext" from WKT to GeoJSON
+            #      and store that in the feature "geometry" dict
 
-            # convert the WKT to GeoJSON and store it in "geometry"
-            if feat["properties"]["wellknowntext"]:
-                wkt = feat["properties"]["wellknowntext"]
-                geomtype = re.split(r'[/(/)\s]', wkt)[0]
-                geomset.add(geomtype)
+            if 'wellknowntext' in cols:
+
+                if feat["properties"]["wellknowntext"]:
+                    wkt = feat["properties"]["wellknowntext"]
+                    geofmts = reformat(wkt)
+
+                    feat["geometry"]["type"] = geofmts[0] #Geometry type
+
+                    # convert the coordinates from a string to a JSON array (Python list)
+                    # Point features seem to add extra square brackets [[ x,y ]]
+                    # NOTE: The following if..else is a workaround
+
+                    # ERROR in WKT
+                    # Apparently, bad WKT can be uploaded to EDD
+                    # check for JSONDecodeError when converting from WKT string to JSON
+
+                    try:
+                        jsongeom = json.loads(geofmts[1])
+
+                        if feat["geometry"]["type"] == "Point":
+                            feat["geometry"]["coordinates"] = jsongeom[0]
+                        else:
+                            feat["geometry"]["coordinates"] = jsongeom
+
+                        # remove the old WKT property
+                        properties.pop("wellknowntext")
+
+                        # append the new feature to the features list in the FeatureCollection dict
+                        collection["features"].append(feat)
+                        
+                    except JSONDecodeError:
+                        # badly formatted WKT... skip it
+                        pass
+
+                else:
+                    # no spatial geometry exists... skip it
+                    pass
 
 
-        # print(json.dumps(collection, sort_keys=True, indent=4))
-        print(geomset)
-
-
-
+        return json.dumps(collection, indent=4)
 
     x = get_from_file('test.json')
 
+    # print(to_GeoJSON(x))
     to_GeoJSON(x)
+
+
+
+# TODO:  the value of the "coordinates" value under the "geometry" object needs to be a javascript array, not a string
+#        also, the point array has two brackets on each end. Remove one pair, for points only.
