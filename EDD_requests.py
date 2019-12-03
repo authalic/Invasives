@@ -1,6 +1,7 @@
-
+import re
 import json
 import requests
+
 
 """
 Noxious Weed Data Client
@@ -94,13 +95,13 @@ countyfips = [49003, 49005, 49011, 49023, 49029, 49035, 49039, 49043, 49045, 490
 # API Data Request limits:
 # Current limit for records returned per request is 3000
 
-        # Option 1
-        # url.start - this is the starting record number.
-        # url.length - this is how many records to return.
+    # Option 1
+    # url.start - this is the starting record number.
+    # url.length - this is how many records to return.
 
-        # Option2
-        # url.rows - number of records to return as a "page".
-        # url.page - page number to return.
+    # Option2
+    # url.rows - number of records to return as a "page".
+    # url.page - page number to return.
 
 
 # EDD Occurrences
@@ -167,11 +168,12 @@ class Occurrence:
         # request a single record to get the "recordsTotal" value for species
         r = requests.get(url, headers=headers, params=payload)
 
-        # save results as object attribute
+        # save record count as object attribute
         self.recordsTotal = json.loads(r.text)["recordsTotal"]
 
         # send the request to get all records for species code
-        self.records = self.getRecords(speciescode) # stored as a dict
+        # store records internally as a dict
+        self.records = self.getRecords(speciescode)
 
 
     def __repr__(self):
@@ -179,6 +181,7 @@ class Occurrence:
         for x in noxweeds:
             if x['sub'] == self.subject:
                 return f"{x['name']} ({x['sciname']})"
+
 
     def count(self):
         """Returns the number of records in the EDDMapS database for this species code"""
@@ -200,15 +203,15 @@ class Occurrence:
         return json.dumps(self.records, sort_keys=True, indent=4)
 
 
-    def export(self, filepath):
+    def export(self, filename):
         """Exports records to a JSON file"""
-        with open(filepath, 'w') as file:
+        with open(filename, 'w') as file:
             file.write(self.as_json())
 
 
-    def export_p(self, filepath):
+    def export_p(self, filename):
         """Exports a prettified JSON file, for viewing"""
-        with open(filepath, 'w') as file:
+        with open(filename, 'w') as file:
             file.write(self.as_jsonp())
 
 
@@ -217,13 +220,80 @@ class Occurrence:
 # instantiate a new Occurrence object, using the subjectnumber ('sub' value in the noxweeds list)
 
 
+
+
 # TESTCODE
 
 if __name__ == "__main__":
-    o = Occurrence(3937)
+    # o = Occurrence(3937)
+    # print(o.count())
+    # print(o.as_jsonp())
+    # o.export_p("test.json")
 
-    print(o.count())
-    print(o.as_jsonp())
+    def get_from_file(filename):
+        """
+        Open an existing JSON file into a dict with the same format as the EDD results
+        reverse of: export(self, filename)
+        """
 
-    o.export_p("test.json")
+        with open(filename, 'r') as file:
+            records = file.read()
+        
+        return json.loads(records)
 
+
+    def to_GeoJSON(records):
+        """Converts a dict of species records to properly formatted GeoJSON"""
+
+        # Geometries in EED Data
+        # stored as WKT, with 3 geometry types: {'POINT', 'POLYGON', 'LINESTRING'}
+
+        # GeoJSON FeatureCollection
+        collection = {
+            "type": "FeatureCollection",
+            "features": []
+        }
+
+        geomset = set()
+
+        # list of columns returned from API
+        cols = records["columns"]
+
+        # list of records
+        # each item in the list is a value for column at that position
+        data = records["data"]
+
+        for record in data:
+
+            # create a dict of column names for key/value pairs
+            properties = {col: "" for col in cols}
+
+            for x in range(len(cols)):
+                properties[cols[x]] = record[x]
+            
+            # generic feature dict
+            feat = {
+                "type": "Feature", 
+                "geometry": {}, 
+                "properties": properties
+                }
+
+            # append the new feature to the features list in the FeatureCollection dict
+            collection["features"].append(feat)
+
+            # convert the WKT to GeoJSON and store it in "geometry"
+            if feat["properties"]["wellknowntext"]:
+                wkt = feat["properties"]["wellknowntext"]
+                geomtype = re.split(r'[/(/)\s]', wkt)[0]
+                geomset.add(geomtype)
+
+
+        # print(json.dumps(collection, sort_keys=True, indent=4))
+        print(geomset)
+
+
+
+
+    x = get_from_file('test.json')
+
+    to_GeoJSON(x)
