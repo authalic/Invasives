@@ -180,10 +180,14 @@ class Occurrence:
             if x['sub'] == self.subject:
                 return f"{x['name']} ({x['sciname']})"
 
-
     def count(self):
         """Returns the number of records in the EDDMapS database for this species code"""
         return self.recordsTotal
+
+
+    def filterspatial(self):
+        """Removes any records that have empty strings in the wellknowntext field"""
+        pass
 
 
     def as_json(self):
@@ -195,6 +199,17 @@ class Occurrence:
         """Returns the species records as JSON formatted for viewing"""
         return json.dumps(self.records, sort_keys=True, indent=4)
 
+
+    def export(self, filepath):
+        """Exports records to a JSON file"""
+        with open(filepath, 'w') as file:
+            file.write(self.as_json())
+
+
+    def export_p(self, filepath):
+        """Exports a prettified JSON file, for viewing"""
+        with open(filepath, 'w') as file:
+            file.write(self.as_jsonp())
 
 
 # Usage
@@ -209,3 +224,6 @@ if __name__ == "__main__":
 
     print(o.count())
     print(o.as_jsonp())
+
+    o.export_p("test.json")
+
