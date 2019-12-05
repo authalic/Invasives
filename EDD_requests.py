@@ -1,6 +1,7 @@
 import re
 import json
 import requests
+import time  # API may need a break between requests
 
 from json import JSONDecodeError
 
@@ -19,7 +20,14 @@ Provides methods to export that data in native JSON and a GIS-friendly GeoJSON f
 # State of Utah Noxious Weed List
 # source:  https://ag.utah.gov/farmers/plants-industry/noxious-weed-control-resources/state-of-utah-noxious-weed-list/
 
+
 noxweeds = [
+    {'sub': '6515', 'class': '3',  'name': 'Tamarisk (Saltcedar)', 'sciname': 'Tamarix ramosissima'},
+    {'sub': '59038','class': '3',  'name': 'Phragmites (Common reed)', 'sciname': 'Phragmites australisssp.'},
+    {'sub': '3022', 'class': '4',  'name': 'Russian olive', 'sciname': 'Elaeagnus angustifolia'},
+    {'sub': '3005', 'class': '1B', 'name': 'Garlic mustard', 'sciname': 'Alliaria petiolata'},
+    {'sub': '3009', 'class': '1B', 'name': 'Giant reed', 'sciname': 'Arundo donax'},
+    {'sub': '3405', 'class': '2',  'name': 'Leafy spurge', 'sciname': 'Euphorbia esula'},
     {'sub': '3400', 'class': '1A', 'name': 'Plumeless thistle', 'sciname': 'Carduus acanthoides'},
     {'sub': '4361', 'class': '1A', 'name': 'Mediterranean sage', 'sciname': 'Salvia aethiopis'},
     {'sub': '4414', 'class': '1A', 'name': 'Common crupina', 'sciname': 'Crupina vulgaris'},
@@ -29,8 +37,6 @@ noxweeds = [
     {'sub': '6158', 'class': '1A', 'name': 'African rue', 'sciname': 'Peganum harmala'},
     {'sub': '6589', 'class': '1A', 'name': 'Ventenata (North Africa grass)', 'sciname': 'Ventenata dubia'},
     {'sub': '6630', 'class': '1A', 'name': 'Syrian beancaper', 'sciname': 'Zygophyllum fabago'},
-    {'sub': '3005', 'class': '1B', 'name': 'Garlic mustard', 'sciname': 'Alliaria petiolata'},
-    {'sub': '3009', 'class': '1B', 'name': 'Giant reed', 'sciname': 'Arundo donax'},
     {'sub': '4411', 'class': '1B', 'name': 'Common St. Johnswort', 'sciname': 'Hypericum perforatum'},
     {'sub': '4535', 'class': '1B', 'name': 'Goatsrue', 'sciname': 'Galega officinalis'},
     {'sub': '5061', 'class': '1B', 'name': 'Camelthorn', 'sciname': 'Alhagi maurorum'},
@@ -42,7 +48,6 @@ noxweeds = [
     {'sub': '30314','class': '1B', 'name': 'Cutleaf vipergrass', 'sciname': 'Scorzonera laciniata'},
     {'sub': '32051','class': '1B', 'name': 'Elongated mustard', 'sciname': 'Brassica elongata'},
     {'sub': '3047', 'class': '2',  'name': 'Purple loosestrife', 'sciname': 'Lythrum salicaria'},
-    {'sub': '3405', 'class': '2',  'name': 'Leafy spurge', 'sciname': 'Euphorbia esula'},
     {'sub': '3800', 'class': '2',  'name': 'Yellow toadflax', 'sciname': 'Linaria vulgaris'},
     {'sub': '4373', 'class': '2',  'name': 'Squarrose knapweed', 'sciname': 'Centaurea virgata'},
     {'sub': '4390', 'class': '2',  'name': 'Yellow starthistle', 'sciname': 'Centaurea solstitialis'},
@@ -67,11 +72,8 @@ noxweeds = [
     {'sub': '5579', 'class': '3',  'name': 'Quackgrass', 'sciname': 'Elymus repens'},
     {'sub': '5931', 'class': '3',  'name': 'Perennial pepperweed(Tall whitetop)', 'sciname': 'Lepidium latifolium'},
     {'sub': '6429', 'class': '3',  'name': 'Perennial Sorghum spp.:Sorghumalmum', 'sciname': 'Sorghum almum'},
-    {'sub': '6515', 'class': '3',  'name': 'Tamarisk (Saltcedar)', 'sciname': 'Tamarix ramosissima'},
     {'sub': '54552','class': '3',  'name': 'Hoary cress', 'sciname': 'Cardariaspp.'},
-    {'sub': '59038','class': '3',  'name': 'Phragmites (Common reed)', 'sciname': 'Phragmites australisssp.'},
     {'sub': '2433', 'class': '4',  'name': 'Cogongrass(Japanese blood grass)', 'sciname': 'Imperata cylindrica'},
-    {'sub': '3022', 'class': '4',  'name': 'Russian olive', 'sciname': 'Elaeagnus angustifolia'},
     {'sub': '4408', 'class': '4',  'name': 'Scotch broom', 'sciname': 'Cytisus scoparius'},
     {'sub': '5632', 'class': '4',  'name': 'Myrtle spurge', 'sciname': 'Euphorbia myrsinites'},
     {'sub': '5702', 'class': '4',  'name': 'Dames Rocket', 'sciname': 'Hesperis matronalis'}
@@ -116,6 +118,8 @@ payload = {
 # Requested by Bugwood maintainers to track/contact API users
 headers = {'user-agent': 'Justin Johnson, Utah DNR, jjohnson2@utah.gov'}
 
+errorlog = "errors.txt"
+
 
 class Occurrence:
     """
@@ -131,6 +135,9 @@ class Occurrence:
         payload["sub"] = speciescode
         recordcount = self.recordsTotal  # total record count in feature service
         batchsize = 3000 # max records per Bugwood API call
+        APIrecords = {} # store the processed API JSON dict record string #ugly
+
+        print("Species: " + str(speciescode))
 
         # send request to Bugwood API
         # use batches, if total record count exceeds 3,000
@@ -148,15 +155,18 @@ class Occurrence:
             payload["start"] = offset
             r = requests.get(url, headers=headers, params=payload)
 
+            # rest a bit, before sending next request, to avoid overloading API server
+            time.sleep(5) # seconds
+
             if offset == 0:
                 # first API request, save complete JSON response as dict
-                records = json.loads(r.text)
+                APIrecords = json.loads(r.text)
             else:
                 # append the contents of the "data" list on each subsequent call
                 subsequent = json.loads(r.text)
-                records["data"] += subsequent["data"]
+                APIrecords["data"] += subsequent["data"]
 
-        return records
+        return APIrecords
 
 
     def __init__(self, speciescode):
@@ -178,8 +188,15 @@ class Occurrence:
         self.recordsTotal = json.loads(r.text)["recordsTotal"]
 
         # send the request to get all records for species code
-        # store records internally as a dict
+        # if any valid records were found, store internally as a dict
         self.records = self.getRecords(speciescode)
+
+        # number of records with properly formatted spatial information
+        # (still... may not be a valid location)
+        if self.records:
+            self.validRecords = len(self.records["data"])
+        else:
+            self.validRecords = 0
 
 
     def __repr__(self):
@@ -192,8 +209,22 @@ class Occurrence:
 
     def count(self):
         """Returns the number of records in the EDDMapS database for this species code"""
+        if self.records:
+            return self.recordsTotal
 
-        return self.recordsTotal
+
+    def validcount(self):
+        """Returns the number of records from the EDDMapS API request with a valid spatial feature"""
+        if self.records:
+            return self.validRecords
+
+
+    def validratio(self):
+        """Returns a string indicating the ratio of valid records to total records"""
+        if self.records:
+            return str(self.validcount()) + r"/" + str(self.count()) + " valid records"
+        else:
+            return "No valid records"
 
 
     def as_JSON(self):
@@ -202,7 +233,10 @@ class Occurrence:
         Errors may exist in spatial data.
         To export for geospatial use, use as_GeoJSON()"""
 
-        return json.dumps(self.records)
+        if self.records:
+            return json.dumps(self.records)
+        else:
+            return ""
 
 
     def export_JSON(self, filename):
@@ -214,8 +248,11 @@ class Occurrence:
 
     def as_JSONPretty(self):
         """Returns the species records as JSONP formatted for human readability"""
-
-        return json.dumps(self.records, sort_keys=False, indent=4)
+        
+        if self.records:
+            return json.dumps(self.records, sort_keys=False, indent=4)
+        else:
+            return ""
 
 
     def export_JSONPretty(self, filename):
@@ -302,8 +339,11 @@ class Occurrence:
                 coords = JSONgeom
             
         except JSONDecodeError:
-            # badly formatted WKT... skip it
-            pass
+            # badly formatted WKT... log it, skip it
+
+            with open(errorlog, "a") as log:
+                log.write(coords + "\n")
+
 
         # return a tuple containing reformatted (for GeoJSON) geometry type and coordinates
         return (geomtype, coords)
@@ -314,6 +354,9 @@ class Occurrence:
         Converts a dict of species records to properly formatted GeoJSON string
         for input into QGIS or ArcGIS
         """
+
+        if not self.records:
+            return ""
 
         # GeoJSON Linter  http://geojsonlint.com/
 
@@ -381,6 +424,11 @@ class Occurrence:
 
                     # append the current feature to the features list in the FeatureCollection dict
                     collection["features"].append(feat)
+                else:
+                    # no spatial data for this feature... log it, skip it
+
+                    with open(errorlog, "a") as log:
+                        log.write(str(feat) + "\n")
 
         return json.dumps(collection, indent=4)
 
@@ -395,10 +443,11 @@ class Occurrence:
 # TESTCODE
 
 if __name__ == "__main__":
-    o = Occurrence(4411) # 4411 - St. Johnswort
-    print(o.count())
-    
+    o = Occurrence(5702) #
+
+    print(o.validratio())
 
     o.export_JSON("test1.json")
     o.export_JSONPretty("test1_pretty.json")
     o.export_GeoJSON("test1_geo.json")
+    o.export_GeoJSON(r"output/sub_" + str(o.subject) + ".json")
